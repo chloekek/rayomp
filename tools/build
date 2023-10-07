@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+fortran_tests=(
+    parallel_do
+)
+
+mkdir --parents .build
+
+cargo build --release --target-dir .build/cargo
+
+{
+
+    cat <<EOF
+
+builddir = .build
+
+rule compile_fortran_test
+    command = \$
+        gfortran \$
+        -O3 \$
+        -fimplicit-none \$
+        -fopenmp \$
+        -c \$
+        -o \$out \$
+        \$in
+    description = Compile \$out
+
+rule link_fortran_test
+    command = \$
+        gfortran \$
+        -L.build/cargo/release \$
+        -Wl,-rpath .build/cargo/release \$
+        -lrayomp \$
+        -o \$out \$
+        \$in
+    description = Link \$out
+
+EOF
+
+    for test in "${fortran_tests[@]}"; do
+        cat <<EOF
+
+build .build/tests/fortran/$test.o: \$
+    compile_fortran_test tests/fortran/$test.f90
+
+build .build/tests/fortran/$test: \$
+    link_fortran_test .build/tests/fortran/$test.o \$
+    | .build/cargo/release/librayomp.so
+
+EOF
+    done
+
+} > .build/build.ninja
+
+ninja -f .build/build.ninja
+
+ninja -f .build/build.ninja -t cleandead
+
+prove "${fortran_tests[@]/#/.build/tests/fortran/}"
